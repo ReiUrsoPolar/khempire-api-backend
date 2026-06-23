@@ -15,6 +15,10 @@ set -e
 : "${DOMINIO:?Define DOMINIO antes de correr (export DOMINIO=api-backend.teudominio.com)}"
 PORT="${PORT:-3000}"
 
+echo "==> A preparar o sistema..."
+apt-get update -y
+apt-get install -y curl ca-certificates gnupg
+
 echo "==> A instalar Node 20, git e ffmpeg..."
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs git ffmpeg
