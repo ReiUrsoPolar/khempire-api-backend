@@ -1,0 +1,17 @@
+{
+  "name": "khempire-api-backend",
+  "version": "1.0.0",
+  "description": "Backend (ShardCloud) da KH Empire API — endpoints pesados (downloads, etc.). Só é chamado pelo Worker com o X-Internal-Secret.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "youtube-dl-exec": "^3.0.1"
+  }
+}
