@@ -102,6 +102,8 @@ async function baixarMedia(input, format) {
   if (!file) return { ok: false, detalhe: String(stderr || stdout).replace(/\s+/g, ' ').trim().slice(-400) }
   const linha = (stdout.trim().split('\n').filter(Boolean).pop() || '').split('|')
   const val   = (s) => (s && s !== 'NA' ? s : null)
+  let tamanho = 0
+  try { tamanho = statSync(join(DL_DIR, file)).size } catch {}
   return { ok: true, resultado: {
     titulo: val(linha[0]),
     autor: val(linha[1]),
@@ -110,6 +112,7 @@ async function baixarMedia(input, format) {
     plataforma: val(linha[4]),
     formato: format,
     ext: file.split('.').pop(),
+    tamanho,
     url: `${PUBLIC_BASE}/file/${file}`,
   } }
 }
@@ -180,7 +183,9 @@ app.get('/tts', async (req, res) => {
       for (const p of parts) { try { unlinkSync(p) } catch {} }
       try { unlinkSync(listFile) } catch {}
     }
-    return res.json({ ok: true, resultado: { texto, lang, url: `${PUBLIC_BASE}/file/${basename(out)}` } })
+    let tamanho = 0
+    try { tamanho = statSync(out).size } catch {}
+    return res.json({ ok: true, resultado: { texto, lang, tamanho, url: `${PUBLIC_BASE}/file/${basename(out)}` } })
   } catch {
     for (const p of parts) { try { unlinkSync(p) } catch {} }
     return res.status(502).json({ ok: false, error_pt: 'Falha ao gerar a voz (idioma invalido ou servico indisponivel).' })
