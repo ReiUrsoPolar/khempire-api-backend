@@ -5,12 +5,19 @@
 // { ok:false, error_pt }.
 
 import express from 'express'
-import ytdl from 'youtube-dl-exec'
 import { randomBytes } from 'crypto'
 import { readdirSync, statSync, existsSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs'
-import { execFileSync } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
+import { promisify } from 'util'
+import { fileURLToPath } from 'url'
 import { join, basename } from 'path'
 import { tmpdir } from 'os'
+
+// Chamamos o BINÁRIO yt-dlp diretamente (não o wrapper youtube-dl-exec, que
+// pendurava em pesquisas yt/sc — o await nunca resolvia → Caddy 502). O binário
+// vem com o pacote youtube-dl-exec.
+const pexecFile = promisify(execFile)
+const YTDLP = fileURLToPath(new URL('../node_modules/youtube-dl-exec/bin/yt-dlp', import.meta.url))
 
 const app    = express()
 const PORT   = process.env.PORT || 3000
@@ -66,32 +73,31 @@ async function baixarMedia(input, format) {
   const isSearch = /^(yt|sc)search/i.test(input)
   const token    = randomBytes(12).toString('hex')
   const outTmpl  = join(DL_DIR, `${token}.%(ext)s`)
-  const base     = { noWarnings: true, noCheckCertificates: true, retries: 3, maxFilesize: MAX_FILESIZE, output: outTmpl }
-  if (!isSearch) base.noPlaylist = true
-  // Áudio: extrai mp3 (deixa o yt-dlp escolher o formato, como o CLI que funciona —
-  // forçar -f bestaudio/best partia o SoundCloud). Vídeo: melhor mp4.
-  const dlOpts = format === 'audio'
-    ? { ...base, extractAudio: true, audioFormat: 'mp3' }
-    : { ...base, format: 'best[ext=mp4]/best' }
+  // Flags exatamente como o CLI que funciona + --print (metadados na MESMA chamada).
+  const args = ['--no-warnings', '--no-check-certificates', '--retries', '3', '--max-filesize', MAX_FILESIZE, '-o', outTmpl]
+  if (!isSearch) args.push('--no-playlist')
+  if (format === 'audio') args.push('-x', '--audio-format', 'mp3')
+  else                    args.push('-f', 'best[ext=mp4]/best')
+  // Imprime 1 linha de metadados DEPOIS de mover o ficheiro (pós-processamento feito).
+  args.push('--print', 'after_move:%(title)s|%(uploader)s|%(duration)s|%(thumbnail)s|%(extractor_key)s', input)
 
-  // 1) Metadados — NÃO-FATAL: se falhar, segue na mesma para o download.
-  let info = {}
+  let stdout = ''
   try {
-    let m = await ytdl(input, { dumpSingleJson: true, noWarnings: true, noCheckCertificates: true })
-    if (m && m._type === 'playlist' && Array.isArray(m.entries)) m = m.entries[0] || {}
-    info = m || {}
-  } catch { /* segue sem metadados */ }
-  // 2) Download.
-  await ytdl(input, dlOpts)
-  // 3) Localiza o ficheiro.
+    const r = await pexecFile(YTDLP, args, { timeout: 25_000, maxBuffer: 12 * 1024 * 1024 })
+    stdout = r.stdout || ''
+  } catch (e) {
+    stdout = (e && e.stdout) || ''   // mesmo com erro de --print, o ficheiro pode ter sido criado
+  }
   const file = readdirSync(DL_DIR).find(f => f.startsWith(token + '.'))
   if (!file) return { ok: false }
+  const linha = (stdout.trim().split('\n').filter(Boolean).pop() || '').split('|')
+  const val   = (s) => (s && s !== 'NA' ? s : null)
   return { ok: true, resultado: {
-    titulo: info?.title || null,
-    autor: info?.uploader || info?.channel || null,
-    duracao: info?.duration || null,
-    thumbnail: info?.thumbnail || null,
-    plataforma: info?.extractor_key || info?.extractor || null,
+    titulo: val(linha[0]),
+    autor: val(linha[1]),
+    duracao: Number(linha[2]) || null,
+    thumbnail: linha[3] && linha[3].startsWith('http') ? linha[3] : null,
+    plataforma: val(linha[4]),
     formato: format,
     ext: file.split('.').pop(),
     url: `${PUBLIC_BASE}/file/${file}`,
