@@ -78,6 +78,9 @@ async function baixarMedia(input, format) {
   // descarregava) → sem ficheiro. Com --no-simulate, descarrega E imprime.
   const args = ['--no-warnings', '--no-check-certificates', '--no-simulate', '--retries', '3', '--max-filesize', MAX_FILESIZE, '-o', outTmpl]
   if (!isSearch) args.push('--no-playlist')
+  // Pesquisa: ignora resultados que falham (DRM/indisponível) e para no 1º que
+  // descarregar com sucesso → nunca fica preso num resultado protegido.
+  else args.push('--ignore-errors', '--max-downloads', '1')
   if (format === 'audio') args.push('-x', '--audio-format', 'mp3')
   else                    args.push('-f', 'best[ext=mp4]/best')
   // Imprime 1 linha de metadados DEPOIS de mover o ficheiro (pós-processamento feito).
@@ -114,7 +117,7 @@ app.get('/dl', async (req, res) => {
   if (!/^https?:\/\//i.test(url) && !/^(yt|sc)search/i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" invalido.' })
   try {
     const r = await baixarMedia(url, format === 'audio' ? 'audio' : 'video')
-    if (!r.ok) return res.status(502).json({ ok: false, error_pt: 'Nao consegui descarregar. ' + (r.detalhe || '') })
+    if (!r.ok) return res.status(502).json({ ok: false, error_pt: 'Nao consegui descarregar o media (link invalido, privado, protegido ou nao suportado).' })
     return res.json(r)
   } catch {
     return res.status(502).json({ ok: false, error_pt: 'Nao consegui obter o media (link invalido, privado, grande demais ou nao suportado).' })
@@ -129,8 +132,8 @@ app.get('/play', async (req, res) => {
   const q = String(req.query.q || req.query.query || '').trim()
   if (!q) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "q" (nome da musica).' })
   try {
-    const r = await baixarMedia('scsearch1:' + q, 'audio')
-    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado. ' + (r.detalhe || '') })
+    const r = await baixarMedia('scsearch10:' + q, 'audio')
+    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado descarregável no SoundCloud para essa pesquisa.' })
     r.resultado.query = q
     r.resultado.fonte = 'SoundCloud'
     return res.json(r)
