@@ -68,13 +68,19 @@ async function baixarMedia(input, format) {
   const outTmpl  = join(DL_DIR, `${token}.%(ext)s`)
   const base     = { noWarnings: true, noCheckCertificates: true, retries: 3, maxFilesize: MAX_FILESIZE, output: outTmpl }
   if (!isSearch) base.noPlaylist = true
+  // Áudio: extrai mp3 (deixa o yt-dlp escolher o formato, como o CLI que funciona —
+  // forçar -f bestaudio/best partia o SoundCloud). Vídeo: melhor mp4.
   const dlOpts = format === 'audio'
-    ? { ...base, extractAudio: true, audioFormat: 'mp3', format: 'bestaudio/best' }
+    ? { ...base, extractAudio: true, audioFormat: 'mp3' }
     : { ...base, format: 'best[ext=mp4]/best' }
 
-  // 1) Metadados.
-  let info = await ytdl(input, { dumpSingleJson: true, noWarnings: true, noCheckCertificates: true, ...(isSearch ? {} : { noPlaylist: true }) })
-  if (info && info._type === 'playlist' && Array.isArray(info.entries)) info = info.entries[0] || info
+  // 1) Metadados — NÃO-FATAL: se falhar, segue na mesma para o download.
+  let info = {}
+  try {
+    let m = await ytdl(input, { dumpSingleJson: true, noWarnings: true, noCheckCertificates: true })
+    if (m && m._type === 'playlist' && Array.isArray(m.entries)) m = m.entries[0] || {}
+    info = m || {}
+  } catch { /* segue sem metadados */ }
   // 2) Download.
   await ytdl(input, dlOpts)
   // 3) Localiza o ficheiro.
