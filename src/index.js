@@ -141,9 +141,9 @@ app.get('/play', async (req, res) => {
   if (!q) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "q" (nome da musica).' })
   try {
     const r = await baixarMedia('scsearch10:' + q, 'audio')
-    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado descarregável no SoundCloud para essa pesquisa.' })
+    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado encontrado para essa pesquisa.' })
     r.resultado.query = q
-    r.resultado.fonte = 'SoundCloud'
+    r.resultado.plataforma = null   // não revelar a fonte
     return res.json(r)
   } catch {
     return res.status(502).json({ ok: false, error_pt: 'Falha ao pesquisar/baixar.' })
