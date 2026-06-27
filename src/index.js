@@ -63,7 +63,7 @@ app.use((req, res, next) => {
 
 // ── Núcleo: descarrega `input` (URL OU "ytsearch1:termo") e re-hospeda ──────
 async function baixarMedia(input, format) {
-  const isSearch = /^ytsearch/i.test(input)
+  const isSearch = /^(yt|sc)search/i.test(input)
   const token    = randomBytes(12).toString('hex')
   const outTmpl  = join(DL_DIR, `${token}.%(ext)s`)
   const base     = { noWarnings: true, noCheckCertificates: true, retries: 3, maxFilesize: MAX_FILESIZE, output: outTmpl }
@@ -96,7 +96,7 @@ async function baixarMedia(input, format) {
 app.get('/dl', async (req, res) => {
   const url    = String(req.query.url || '').trim()
   const format = String(req.query.format || 'video').toLowerCase()
-  if (!/^https?:\/\//i.test(url) && !/^ytsearch/i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" invalido.' })
+  if (!/^https?:\/\//i.test(url) && !/^(yt|sc)search/i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" invalido.' })
   try {
     const r = await baixarMedia(url, format === 'audio' ? 'audio' : 'video')
     if (!r.ok) return res.status(502).json({ ok: false, error_pt: 'Nao consegui descarregar o media (link invalido, privado, grande demais ou nao suportado).' })
@@ -106,15 +106,18 @@ app.get('/dl', async (req, res) => {
   }
 })
 
-// ── GET /play?q=nome&format=audio|video  (pesquisa YouTube + download) ────
+// ── GET /play?q=nome  (pesquisa SoundCloud + download do MP3) ─────────────
+// SoundCloud em vez de YouTube: o YT bloqueia pesquisa/download de servidores
+// (datacenter IP → "Sign in to confirm you're not a bot"); o SoundCloud não.
+// SoundCloud é só áudio, por isso o play devolve sempre MP3.
 app.get('/play', async (req, res) => {
-  const q      = String(req.query.q || req.query.query || '').trim()
-  const format = String(req.query.format || 'audio').toLowerCase() === 'video' ? 'video' : 'audio'
-  if (!q) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "q" (nome da musica/video).' })
+  const q = String(req.query.q || req.query.query || '').trim()
+  if (!q) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "q" (nome da musica).' })
   try {
-    const r = await baixarMedia('ytsearch1:' + q, format)
-    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado encontrado.' })
+    const r = await baixarMedia('scsearch1:' + q, 'audio')
+    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado encontrado no SoundCloud.' })
     r.resultado.query = q
+    r.resultado.fonte = 'SoundCloud'
     return res.json(r)
   } catch {
     return res.status(502).json({ ok: false, error_pt: 'Falha ao pesquisar/baixar.' })
