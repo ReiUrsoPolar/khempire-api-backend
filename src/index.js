@@ -74,7 +74,9 @@ async function baixarMedia(input, format) {
   const token    = randomBytes(12).toString('hex')
   const outTmpl  = join(DL_DIR, `${token}.%(ext)s`)
   // Flags exatamente como o CLI que funciona + --print (metadados na MESMA chamada).
-  const args = ['--no-warnings', '--no-check-certificates', '--retries', '3', '--max-filesize', MAX_FILESIZE, '-o', outTmpl]
+  // --no-simulate é OBRIGATÓRIO: o --print (metadados) implica --simulate (não
+  // descarregava) → sem ficheiro. Com --no-simulate, descarrega E imprime.
+  const args = ['--no-warnings', '--no-check-certificates', '--no-simulate', '--retries', '3', '--max-filesize', MAX_FILESIZE, '-o', outTmpl]
   if (!isSearch) args.push('--no-playlist')
   if (format === 'audio') args.push('-x', '--audio-format', 'mp3')
   else                    args.push('-f', 'best[ext=mp4]/best')
