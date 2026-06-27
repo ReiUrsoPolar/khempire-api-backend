@@ -79,8 +79,12 @@ async function baixarMedia(input, format) {
   const args = ['--no-warnings', '--no-check-certificates', '--no-simulate', '--retries', '3', '--max-filesize', MAX_FILESIZE, '-o', outTmpl]
   if (!isSearch) args.push('--no-playlist')
   // Pesquisa: ignora resultados que falham (DRM/indisponível) e para no 1º que
-  // descarregar com sucesso → nunca fica preso num resultado protegido.
-  else args.push('--ignore-errors', '--max-downloads', '1')
+  // descarregar. + Filtra edições lentas/alteradas (slowed/reverb/nightcore/8d/
+  // sped up) — o SoundCloud está cheio delas e davam "música em câmara lenta".
+  else args.push(
+    '--ignore-errors', '--max-downloads', '1',
+    '--match-filter', 'title !~= (?i)(slowed|reverb|nightcore|night core|sped ?up|speed ?up|8 ?d|daycore|chopped)',
+  )
   if (format === 'audio') args.push('-x', '--audio-format', 'mp3')
   else                    args.push('-f', 'best[ext=mp4]/best')
   // Imprime 1 linha de metadados DEPOIS de mover o ficheiro (pós-processamento feito).
