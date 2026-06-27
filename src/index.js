@@ -83,15 +83,16 @@ async function baixarMedia(input, format) {
   // Imprime 1 linha de metadados DEPOIS de mover o ficheiro (pós-processamento feito).
   args.push('--print', 'after_move:%(title)s|%(uploader)s|%(duration)s|%(thumbnail)s|%(extractor_key)s', input)
 
-  let stdout = ''
+  let stdout = '', stderr = ''
   try {
     const r = await pexecFile(YTDLP, args, { timeout: 25_000, maxBuffer: 12 * 1024 * 1024 })
-    stdout = r.stdout || ''
+    stdout = r.stdout || ''; stderr = r.stderr || ''
   } catch (e) {
-    stdout = (e && e.stdout) || ''   // mesmo com erro de --print, o ficheiro pode ter sido criado
+    stdout = (e && e.stdout) || ''
+    stderr = (e && (e.stderr || e.message)) || ''   // mesmo com erro, o ficheiro pode ter sido criado
   }
   const file = readdirSync(DL_DIR).find(f => f.startsWith(token + '.'))
-  if (!file) return { ok: false }
+  if (!file) return { ok: false, detalhe: String(stderr || stdout).replace(/\s+/g, ' ').trim().slice(-400) }
   const linha = (stdout.trim().split('\n').filter(Boolean).pop() || '').split('|')
   const val   = (s) => (s && s !== 'NA' ? s : null)
   return { ok: true, resultado: {
@@ -113,7 +114,7 @@ app.get('/dl', async (req, res) => {
   if (!/^https?:\/\//i.test(url) && !/^(yt|sc)search/i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" invalido.' })
   try {
     const r = await baixarMedia(url, format === 'audio' ? 'audio' : 'video')
-    if (!r.ok) return res.status(502).json({ ok: false, error_pt: 'Nao consegui descarregar o media (link invalido, privado, grande demais ou nao suportado).' })
+    if (!r.ok) return res.status(502).json({ ok: false, error_pt: 'Nao consegui descarregar. ' + (r.detalhe || '') })
     return res.json(r)
   } catch {
     return res.status(502).json({ ok: false, error_pt: 'Nao consegui obter o media (link invalido, privado, grande demais ou nao suportado).' })
@@ -129,7 +130,7 @@ app.get('/play', async (req, res) => {
   if (!q) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "q" (nome da musica).' })
   try {
     const r = await baixarMedia('scsearch1:' + q, 'audio')
-    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado encontrado no SoundCloud.' })
+    if (!r.ok) return res.status(404).json({ ok: false, error_pt: 'Nenhum resultado. ' + (r.detalhe || '') })
     r.resultado.query = q
     r.resultado.fonte = 'SoundCloud'
     return res.json(r)
