@@ -88,7 +88,7 @@ async function baixarMedia(input, format) {
   if (format === 'audio') args.push('-x', '--audio-format', 'mp3')
   else                    args.push('-f', 'best[ext=mp4]/best')
   // Imprime 1 linha de metadados DEPOIS de mover o ficheiro (pós-processamento feito).
-  args.push('--print', 'after_move:%(title)s|%(uploader)s|%(duration)s|%(thumbnail)s|%(extractor_key)s', input)
+  args.push('--print', 'after_move:%(title)s|%(uploader)s|%(duration)s|%(thumbnail)s|%(extractor_key)s|%(view_count)s', input)
 
   let stdout = '', stderr = ''
   try {
@@ -110,6 +110,7 @@ async function baixarMedia(input, format) {
     duracao: Number(linha[2]) || null,
     thumbnail: linha[3] && linha[3].startsWith('http') ? linha[3] : null,
     plataforma: val(linha[4]),
+    visualizacoes: Number(linha[5]) || null,
     formato: format,
     ext: file.split('.').pop(),
     tamanho,
