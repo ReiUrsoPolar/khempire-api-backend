@@ -250,6 +250,22 @@ app.get('/efeito', async (req, res) => {
   }
 })
 
+// ── GET /letra?artista=&musica=  (letra via lyrics.ovh — IP normal da VPS) ──
+// (o Cloudflare é bloqueado pelo lyrics.ovh; a VPS não.)
+app.get('/letra', async (req, res) => {
+  const artista = String(req.query.artista || req.query.artist || '').trim()
+  const musica  = String(req.query.musica || req.query.title || '').trim()
+  if (!artista || !musica) return res.status(400).json({ ok: false, error_pt: 'Faltam "artista" e "musica".' })
+  try {
+    const r = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(artista)}/${encodeURIComponent(musica)}`, { signal: AbortSignal.timeout(12_000) })
+    const d = await r.json().catch(() => ({}))
+    if (!d.lyrics) return res.status(404).json({ ok: false, error_pt: 'Letra não encontrada.' })
+    return res.json({ ok: true, resultado: { artista, musica, letra: d.lyrics.trim().slice(0, 3000) } })
+  } catch {
+    return res.status(502).json({ ok: false, error_pt: 'Falha ao obter a letra.' })
+  }
+})
+
 app.use((_req, res) => res.status(404).json({ ok: false, error_pt: 'Endpoint nao existe no backend.' }))
 
 app.listen(PORT, () => console.log(`khempire-api-backend a ouvir na porta ${PORT}`))
