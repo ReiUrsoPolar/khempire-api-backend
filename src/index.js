@@ -408,9 +408,12 @@ app.get('/removerfundo', async (req, res) => {
   const url = String(req.query.url || '').trim()
   if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" (imagem) invalido.' })
   const out = _novoOut('png'); let inp
+  // Procura o rembg: env REMBG_BIN, depois o venv (~/rembg-venv), senão o PATH.
+  const rembgBin = [process.env.REMBG_BIN, '/root/rembg-venv/bin/rembg', join(process.env.HOME || '/root', 'rembg-venv/bin/rembg')]
+    .find(p => { try { return p && existsSync(p) } catch { return false } }) || 'rembg'
   try {
     inp = await _baixarTmp(url, 'img')
-    execFileSync('rembg', ['i', inp, out], { stdio: 'ignore', timeout: 60_000 })
+    execFileSync(rembgBin, ['i', inp, out], { stdio: 'ignore', timeout: 60_000 })
     try { unlinkSync(inp) } catch {}
     if (!existsSync(out) || statSync(out).size === 0) throw new Error('vazio')
     return res.json(_servirFile(out))
