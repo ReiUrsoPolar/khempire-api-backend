@@ -250,6 +250,32 @@ app.get('/efeito', async (req, res) => {
   }
 })
 
+// ── GET /noticias?q=&lang=  (Google News RSS — IP normal da VPS) ───────────
+// (o Cloudflare recebe feed vazio do Google News; a VPS recebe os itens.)
+app.get('/noticias', async (req, res) => {
+  const q = String(req.query.q || req.query.query || '').trim()
+  let lang = String(req.query.lang || 'pt-BR').trim()
+  if (/^pt$/i.test(lang)) lang = 'pt-BR'
+  try {
+    const url = q
+      ? `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=${lang}&gl=BR&ceid=BR:pt-419`
+      : `https://news.google.com/rss?hl=${lang}&gl=BR&ceid=BR:pt-419`
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(12_000) })
+    const xml = await r.text()
+    const items = [...xml.matchAll(/<item>[\s\S]*?<\/item>/g)].slice(0, 8).map(m => {
+      const t = m[0].match(/<title><!\[CDATA\[(.*?)\]\]>|<title>(.*?)<\/title>/)
+      const l = m[0].match(/<link>(.*?)<\/link>/)
+      const d = m[0].match(/<pubDate>(.*?)<\/pubDate>/)
+      const s = m[0].match(/<source[^>]*>(.*?)<\/source>/)
+      return { titulo: t?.[1] || t?.[2] || null, url: l?.[1] || null, data: d?.[1] || null, fonte: s?.[1] || null }
+    })
+    if (!items.length) return res.status(404).json({ ok: false, error_pt: 'Sem notícias encontradas.' })
+    return res.json({ ok: true, resultado: { query: q || 'destaques', noticias: items } })
+  } catch {
+    return res.status(502).json({ ok: false, error_pt: 'Falha ao obter notícias.' })
+  }
+})
+
 // ── GET /letra?artista=&musica=  (letra via lyrics.ovh — IP normal da VPS) ──
 // (o Cloudflare é bloqueado pelo lyrics.ovh; a VPS não.)
 app.get('/letra', async (req, res) => {
@@ -264,6 +290,78 @@ app.get('/letra', async (req, res) => {
   } catch {
     return res.status(502).json({ ok: false, error_pt: 'Falha ao obter a letra.' })
   }
+})
+
+// ── Ferramentas de media (imagem/vídeo via ffmpeg) — `url` é um link direto ──
+async function _baixarTmp(url, ext = 'src') {
+  const rr = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20_000) })
+  if (!rr.ok) throw new Error('fetch ' + rr.status)
+  const buf = Buffer.from(await rr.arrayBuffer())
+  if (buf.length > 64 * 1024 * 1024) throw new Error('grande')
+  const p = join(DL_DIR, randomBytes(12).toString('hex') + '.' + ext)
+  writeFileSync(p, buf)
+  return p
+}
+function _servirFile(out) {
+  let tamanho = 0; try { tamanho = statSync(out).size } catch {}
+  return { ok: true, resultado: { tamanho, url: `${PUBLIC_BASE}/file/${basename(out)}` } }
+}
+function _ff(args, timeout = 40_000) { execFileSync('ffmpeg', ['-y', ...args], { stdio: 'ignore', timeout }) }
+function _novoOut(ext) { return join(DL_DIR, randomBytes(12).toString('hex') + '.' + ext) }
+
+// GET /sticker?url=<imagem/vídeo>  → figurinha WhatsApp (webp 512x512)
+app.get('/sticker', async (req, res) => {
+  const url = String(req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" invalido.' })
+  const out = _novoOut('webp'); let inp
+  try {
+    inp = await _baixarTmp(url)
+    _ff(['-i', inp, '-t', '6', '-vf', 'scale=512:512:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000', '-vcodec', 'libwebp', '-q:v', '70', '-loop', '0', '-an', '-vsync', '0', out], 25_000)
+    try { unlinkSync(inp) } catch {}
+    return res.json(_servirFile(out))
+  } catch { try { unlinkSync(inp) } catch {}; try { unlinkSync(out) } catch {}; return res.status(502).json({ ok: false, error_pt: 'Falha ao criar a figurinha (imagem/video invalido).' }) }
+})
+
+// GET /gif?url=<vídeo>  → GIF (10s, com paleta para qualidade)
+app.get('/gif', async (req, res) => {
+  const url = String(req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" (video) invalido.' })
+  const out = _novoOut('gif'); let inp
+  try {
+    inp = await _baixarTmp(url, 'mp4')
+    _ff(['-i', inp, '-t', '10', '-vf', 'fps=12,scale=360:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse', '-loop', '0', out], 45_000)
+    try { unlinkSync(inp) } catch {}
+    return res.json(_servirFile(out))
+  } catch { try { unlinkSync(inp) } catch {}; try { unlinkSync(out) } catch {}; return res.status(502).json({ ok: false, error_pt: 'Falha ao converter para GIF.' }) }
+})
+
+// GET /comprimir?url=<vídeo>  → reduz o tamanho (re-encode H.264 CRF 30)
+app.get('/comprimir', async (req, res) => {
+  const url = String(req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" (video) invalido.' })
+  const out = _novoOut('mp4'); let inp
+  try {
+    inp = await _baixarTmp(url, 'mp4')
+    _ff(['-i', inp, '-vcodec', 'libx264', '-crf', '30', '-preset', 'veryfast', '-acodec', 'aac', '-b:a', '96k', '-movflags', '+faststart', out], 90_000)
+    try { unlinkSync(inp) } catch {}
+    return res.json(_servirFile(out))
+  } catch { try { unlinkSync(inp) } catch {}; try { unlinkSync(out) } catch {}; return res.status(502).json({ ok: false, error_pt: 'Falha ao comprimir o video.' }) }
+})
+
+// GET /converter?url=<ficheiro>&para=<formato>  → converte media (áudio/vídeo/imagem)
+app.get('/converter', async (req, res) => {
+  const url  = String(req.query.url || '').trim()
+  const para = String(req.query.para || req.query.format || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" invalido.' })
+  const OK = ['mp3', 'wav', 'ogg', 'm4a', 'opus', 'aac', 'mp4', 'webm', 'mkv', 'gif', 'png', 'jpg', 'jpeg', 'webp']
+  if (!OK.includes(para)) return res.status(400).json({ ok: false, error_pt: 'Formato "para" invalido. Usa: ' + OK.join(', ') + '.' })
+  const out = _novoOut(para); let inp
+  try {
+    inp = await _baixarTmp(url)
+    _ff(['-i', inp, out], 60_000)
+    try { unlinkSync(inp) } catch {}
+    return res.json(_servirFile(out))
+  } catch { try { unlinkSync(inp) } catch {}; try { unlinkSync(out) } catch {}; return res.status(502).json({ ok: false, error_pt: 'Falha ao converter.' }) }
 })
 
 app.use((_req, res) => res.status(404).json({ ok: false, error_pt: 'Endpoint nao existe no backend.' }))
