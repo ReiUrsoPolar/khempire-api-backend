@@ -31,6 +31,21 @@ const DL_DIR       = join(tmpdir(), 'khdl')
 const FILE_TTL_MS  = 20 * 60_000   // ficheiros apagados 20 min após criados
 const MAX_FILESIZE = '64M'         // limite de download (protege o disco + alinha com o WhatsApp)
 
+// Efeitos de voz (filtros ffmpeg) — usados pelo /efeito. asetrate muda o pitch
+// (voz fina/grossa); atempo muda a velocidade; aecho/areverse/vibrato = efeitos.
+const EFEITOS = {
+  grave  : 'aresample=44100,asetrate=35280,aresample=44100',  // voz grossa
+  menino : 'aresample=44100,asetrate=38000,aresample=44100',  // rapaz
+  agudo  : 'aresample=44100,asetrate=57330,aresample=44100',  // voz fina
+  menina : 'aresample=44100,asetrate=54000,aresample=44100',  // rapariga
+  esquilo: 'aresample=44100,asetrate=64000,aresample=44100',  // chipmunk
+  rapido : 'atempo=1.5',
+  lento  : 'atempo=0.7',
+  eco    : 'aecho=0.8:0.9:1000:0.3',
+  reverso: 'areverse',
+  robo   : 'vibrato=f=7:d=0.6',
+}
+
 try { mkdirSync(DL_DIR, { recursive: true }) } catch {}
 
 // Limpeza periódica dos ficheiros antigos.
@@ -190,6 +205,48 @@ app.get('/tts', async (req, res) => {
   } catch {
     for (const p of parts) { try { unlinkSync(p) } catch {} }
     return res.status(502).json({ ok: false, error_pt: 'Falha ao gerar a voz (idioma invalido ou servico indisponivel).' })
+  }
+})
+
+// ── GET /toaudio?url=...  (vídeo → MP3, igual ao /dl com format=audio) ─────
+app.get('/toaudio', async (req, res) => {
+  const url = String(req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(url) && !/^(yt|sc)search/i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" invalido.' })
+  try {
+    const r = await baixarMedia(url, 'audio')
+    if (!r.ok) return res.status(502).json({ ok: false, error_pt: 'Nao consegui extrair o audio (link invalido, privado ou nao suportado).' })
+    return res.json(r)
+  } catch {
+    return res.status(502).json({ ok: false, error_pt: 'Falha ao converter para audio.' })
+  }
+})
+
+// ── GET /efeito?url=<audio>&tipo=esquilo  (efeito de voz, mp3 re-hospedado) ─
+// `url` deve ser um link DIRETO de áudio (ex: o url devolvido por /play ou /toaudio).
+app.get('/efeito', async (req, res) => {
+  const url  = String(req.query.url || '').trim()
+  const tipo = String(req.query.tipo || req.query.efeito || 'esquilo').toLowerCase()
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" (audio) invalido. Usa um link direto de audio (ex: o url do /play ou /toaudio).' })
+  const filtro = EFEITOS[tipo]
+  if (!filtro) return res.status(400).json({ ok: false, error_pt: 'Tipo invalido. Usa um de: ' + Object.keys(EFEITOS).join(', ') + '.' })
+
+  const token = randomBytes(12).toString('hex')
+  const inp = join(DL_DIR, token + '.src')
+  const out = join(DL_DIR, token + '.mp3')
+  try {
+    const rr = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20_000) })
+    if (!rr.ok) throw new Error('fetch ' + rr.status)
+    const buf = Buffer.from(await rr.arrayBuffer())
+    if (buf.length > 64 * 1024 * 1024) throw new Error('grande')
+    writeFileSync(inp, buf)
+    execFileSync('ffmpeg', ['-y', '-i', inp, '-af', filtro, '-acodec', 'libmp3lame', out], { stdio: 'ignore', timeout: 25_000 })
+    try { unlinkSync(inp) } catch {}
+    let tamanho = 0; try { tamanho = statSync(out).size } catch {}
+    return res.json({ ok: true, resultado: { tipo, efeito: tipo, tamanho, url: `${PUBLIC_BASE}/file/${basename(out)}` } })
+  } catch {
+    try { unlinkSync(inp) } catch {}
+    try { unlinkSync(out) } catch {}
+    return res.status(502).json({ ok: false, error_pt: 'Falha ao aplicar o efeito (audio invalido, muito grande ou indisponivel).' })
   }
 })
 
