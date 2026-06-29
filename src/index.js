@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url'
 import { join, basename } from 'path'
 import { tmpdir } from 'os'
 import { gerarLogo, LOGO_ESTILOS, gerarTheme, THEME_ESTILOS, gerarTtp } from './logo.js'
+import { gerarShip, gerarWanted, gerarRip, gerarJail, gerarWelcome, gerarQuote } from './montagens.js'
 
 // Chamamos o BINÁRIO yt-dlp diretamente (não o wrapper youtube-dl-exec, que
 // pendurava em pesquisas yt/sc — o await nunca resolvia → Caddy 502). O binário
@@ -483,6 +484,100 @@ app.get('/removerfundo', async (req, res) => {
     const semRembg = /ENOENT|not found|spawn/i.test(String(e?.message ?? ''))
     return res.status(502).json({ ok: false, error_pt: semRembg ? 'Remover-fundo ainda nao ativo na VPS (instala: pip install rembg).' : 'Falha ao remover o fundo.' })
   }
+})
+
+// ── Montagens (brincadeiras de imagem, ImageMagick) — montagens.js ──────────
+// Recebem imagens por URL (links diretos), descarregam-nas e devolvem o PNG
+// re-hospedado. Mesmo tratamento de erro do /logo (avisa se o IM faltar).
+const _erroMontagem = (res, e, nome) => {
+  const semIM = /ENOENT|not found|spawn|No such file/i.test(String(e?.message ?? ''))
+  return res.status(502).json({ ok: false, error_pt: semIM
+    ? 'Gerador de imagens ainda nao ativo na VPS (instala: sudo apt install -y imagemagick).'
+    : `Falha ao gerar ${nome}.` })
+}
+
+// GET /ship?img1=&img2=&nome1=&nome2=  (alias /casal) → casal + % compatibilidade
+const _ship = async (req, res) => {
+  const img1 = String(req.query.img1 || req.query.img || '').trim()
+  const img2 = String(req.query.img2 || '').trim()
+  if (!/^https?:\/\//i.test(img1) || !/^https?:\/\//i.test(img2)) return res.status(400).json({ ok: false, error_pt: 'Faltam duas imagens validas ("img1" e "img2").' })
+  const out = _novoOut('png'); let a, b
+  try {
+    a = await _baixarTmp(img1, 'img'); b = await _baixarTmp(img2, 'img')
+    const r = gerarShip({ img1: a, img2: b, nome1: req.query.nome1, nome2: req.query.nome2, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    const out2 = _servirFile(out); out2.resultado.compatibilidade = r.pct
+    return res.json(out2)
+  } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'o ship') }
+  finally { try { unlinkSync(a) } catch {}; try { unlinkSync(b) } catch {} }
+}
+app.get('/ship', _ship)
+app.get('/casal', _ship)
+
+// GET /wanted?img=&nome=&recompensa= → cartaz PROCURADO
+app.get('/wanted', async (req, res) => {
+  const img = String(req.query.img || req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(img)) return res.status(400).json({ ok: false, error_pt: 'Parametro "img" (imagem) invalido.' })
+  const out = _novoOut('png'); let inp
+  try {
+    inp = await _baixarTmp(img, 'img')
+    gerarWanted({ img: inp, nome: req.query.nome, recompensa: req.query.recompensa, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    return res.json(_servirFile(out))
+  } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'o cartaz') }
+  finally { try { unlinkSync(inp) } catch {} }
+})
+
+// GET /rip?img=&nome= → lápide
+app.get('/rip', async (req, res) => {
+  const img = String(req.query.img || req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(img)) return res.status(400).json({ ok: false, error_pt: 'Parametro "img" (imagem) invalido.' })
+  const out = _novoOut('png'); let inp
+  try {
+    inp = await _baixarTmp(img, 'img')
+    gerarRip({ img: inp, nome: req.query.nome, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    return res.json(_servirFile(out))
+  } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'a lapide') }
+  finally { try { unlinkSync(inp) } catch {} }
+})
+
+// GET /jail?img= → atrás das grades
+app.get('/jail', async (req, res) => {
+  const img = String(req.query.img || req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(img)) return res.status(400).json({ ok: false, error_pt: 'Parametro "img" (imagem) invalido.' })
+  const out = _novoOut('png'); let inp
+  try {
+    inp = await _baixarTmp(img, 'img')
+    gerarJail({ img: inp, imBin: _imBin, dir: DL_DIR, out })
+    return res.json(_servirFile(out))
+  } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'a imagem') }
+  finally { try { unlinkSync(inp) } catch {} }
+})
+
+// GET /welcome?img=&nome=&sub=&titulo=&estilo= → cartão de boas-vindas
+app.get('/welcome', async (req, res) => {
+  const img = String(req.query.img || req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(img)) return res.status(400).json({ ok: false, error_pt: 'Parametro "img" (foto) invalido.' })
+  const out = _novoOut('png'); let inp
+  try {
+    inp = await _baixarTmp(img, 'img')
+    gerarWelcome({ img: inp, nome: req.query.nome, sub: req.query.sub, titulo: req.query.titulo, estilo: req.query.estilo, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    return res.json(_servirFile(out))
+  } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'o cartao') }
+  finally { try { unlinkSync(inp) } catch {} }
+})
+
+// GET /quote?img=&texto=&autor= → citação "make it a quote"
+app.get('/quote', async (req, res) => {
+  const img = String(req.query.img || req.query.url || '').trim()
+  const texto = String(req.query.texto || req.query.text || '').trim()
+  if (!/^https?:\/\//i.test(img)) return res.status(400).json({ ok: false, error_pt: 'Parametro "img" (foto) invalido.' })
+  if (!texto) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "texto".' })
+  const out = _novoOut('png'); let inp
+  try {
+    inp = await _baixarTmp(img, 'img')
+    gerarQuote({ img: inp, texto, autor: req.query.autor, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    return res.json(_servirFile(out))
+  } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'a citacao') }
+  finally { try { unlinkSync(inp) } catch {} }
 })
 
 app.use((_req, res) => res.status(404).json({ ok: false, error_pt: 'Endpoint nao existe no backend.' }))
