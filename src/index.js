@@ -12,6 +12,7 @@ import { promisify } from 'util'
 import { fileURLToPath } from 'url'
 import { join, basename } from 'path'
 import { tmpdir } from 'os'
+import { gerarLogo, LOGO_ESTILOS } from './logo.js'
 
 // Chamamos o BINÁRIO yt-dlp diretamente (não o wrapper youtube-dl-exec, que
 // pendurava em pesquisas yt/sc — o await nunca resolvia → Caddy 502). O binário
@@ -387,6 +388,32 @@ app.get('/theme', (req, res) => {
     const r = _servirFile(out); r.resultado.nome = nome; r.resultado.estilo = _ESTILOS[estilo] ? estilo : 'polar'
     return res.json(r)
   } catch { try { unlinkSync(out) } catch {}; return res.status(502).json({ ok: false, error_pt: 'Falha ao gerar o tema.' }) }
+})
+
+// ── /logo?texto=Polar&estilo=neon → logo de texto estilizado (ImageMagick) ───
+// Auto-hospedado e bonito (neon com brilho, metálico ouro/cromado, fogo, 3D,
+// arco-íris). A lógica vive em logo.js (partilhada com o script de preview).
+// Sem depender de sites externos (ephoto360/textpro bloqueiam acesso de servidor).
+// Procura o ImageMagick: env IM_BIN, depois magick (IM7) ou convert (IM6).
+const _imBin = [process.env.IM_BIN, '/usr/bin/magick', '/usr/bin/convert', '/usr/local/bin/magick', '/usr/local/bin/convert']
+  .find(p => { try { return p && existsSync(p) } catch { return false } }) || 'convert'
+const _idBin = [process.env.ID_BIN, '/usr/bin/identify', '/usr/local/bin/identify']
+  .find(p => { try { return p && existsSync(p) } catch { return false } }) || (/magick(\.exe)?$/i.test(_imBin) ? _imBin : 'identify')
+app.get('/logo', (req, res) => {
+  const texto = String(req.query.texto || req.query.text || req.query.nome || '').trim()
+  if (!texto) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "texto".' })
+  if (!existsSync(THEME_FONT)) return res.status(502).json({ ok: false, error_pt: 'Fonte em falta na VPS. Instala: sudo apt install -y fonts-dejavu-core' })
+  const estiloKey = String(req.query.estilo || req.query.tema || req.query.category || 'neon').toLowerCase()
+  const out = _novoOut('png')
+  try {
+    gerarLogo({ texto, estilo: estiloKey, imBin: _imBin, idBin: _idBin, font: THEME_FONT, dir: DL_DIR, out })
+    const r = _servirFile(out); r.resultado.texto = texto; r.resultado.estilo = LOGO_ESTILOS[estiloKey] ? estiloKey : 'neon'
+    return res.json(r)
+  } catch (e) {
+    try { unlinkSync(out) } catch {}
+    const semIM = /ENOENT|not found|spawn|No such file/i.test(String(e?.message ?? ''))
+    return res.status(502).json({ ok: false, error_pt: semIM ? 'Gerador de logos ainda nao ativo na VPS (instala: sudo apt install -y imagemagick).' : 'Falha ao gerar o logo.' })
+  }
 })
 
 // ── /upscale?url=<imagem>&escala=2 → aumenta+afia (lanczos+unsharp) ──────────
