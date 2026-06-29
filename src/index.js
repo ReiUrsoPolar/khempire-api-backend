@@ -12,7 +12,7 @@ import { promisify } from 'util'
 import { fileURLToPath } from 'url'
 import { join, basename } from 'path'
 import { tmpdir } from 'os'
-import { gerarLogo, LOGO_ESTILOS } from './logo.js'
+import { gerarLogo, LOGO_ESTILOS, gerarTheme, THEME_ESTILOS } from './logo.js'
 
 // Chamamos o BINÁRIO yt-dlp diretamente (não o wrapper youtube-dl-exec, que
 // pendurava em pesquisas yt/sc — o await nunca resolvia → Caddy 502). O binário
@@ -365,29 +365,25 @@ app.get('/converter', async (req, res) => {
   } catch { try { unlinkSync(inp) } catch {}; try { unlinkSync(out) } catch {}; return res.status(502).json({ ok: false, error_pt: 'Falha ao converter.' }) }
 })
 
-// ── /theme?nome=Polar&estilo=neon → cartão personalizado (gradiente + nome) ──
+// ── /theme?nome=Polar&estilo=polar&sub=... → cartão personalizado (ImageMagick) ──
+// Cartão bonito (spotlight + nome com brilho + subtítulo). Lógica em logo.js.
 const THEME_FONT = process.env.THEME_FONT || '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-const _ESTILOS = {
-  polar:  ['0x0a2540', '0x00e0ff'], neon: ['0x7c3aed', '0xff2d95'], fogo: ['0xff512f', '0xf09819'],
-  matrix: ['0x05140a', '0x00ff66'], ouro: ['0x141414', '0xffd700'], roxo: ['0x2b0a4d', '0xc44eff'],
-  oceano: ['0x000428', '0x004e92'], rosa: ['0xff0844', '0xffb199'], verde: ['0x0f2027', '0x2bff88'],
-}
 app.get('/theme', (req, res) => {
-  const nome = String(req.query.nome || req.query.text || '').trim().slice(0, 24)
+  const nome = String(req.query.nome || req.query.text || req.query.texto || '').trim()
   if (!nome) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "nome".' })
+  if (!existsSync(THEME_FONT)) return res.status(502).json({ ok: false, error_pt: 'Fonte em falta na VPS. Instala: sudo apt install -y fonts-dejavu-core' })
   const estilo = String(req.query.estilo || req.query.tema || 'polar').toLowerCase()
-  const [c0, c1] = _ESTILOS[estilo] || _ESTILOS.polar
-  const txt = nome.replace(/[\\:%']/g, ' ')
-  const sub = String(req.query.sub || req.query.subtitulo || '').slice(0, 40).replace(/[\\:%']/g, ' ')
-  const out = _novoOut('png')
+  const sub    = String(req.query.sub || req.query.subtitulo || '')
+  const out    = _novoOut('png')
   try {
-    if (!existsSync(THEME_FONT)) return res.status(502).json({ ok: false, error_pt: 'Fonte em falta na VPS. Instala: sudo apt install -y fonts-dejavu-core' })
-    const filtros = [`drawtext=fontfile=${THEME_FONT}:text='${txt}':fontcolor=white:fontsize=150:x=(w-text_w)/2:y=(h-text_h)/2-20:shadowcolor=black@0.55:shadowx=5:shadowy=5`]
-    if (sub) filtros.push(`drawtext=fontfile=${THEME_FONT}:text='${sub}':fontcolor=white@0.85:fontsize=46:x=(w-text_w)/2:y=h/2+95`)
-    _ff(['-f', 'lavfi', '-i', `gradients=s=1280x720:c0=${c0}:c1=${c1}:type=radial`, '-vf', filtros.join(','), '-frames:v', '1', out], 20_000)
-    const r = _servirFile(out); r.resultado.nome = nome; r.resultado.estilo = _ESTILOS[estilo] ? estilo : 'polar'
+    gerarTheme({ texto: nome, sub, estilo, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    const r = _servirFile(out); r.resultado.nome = nome; r.resultado.estilo = THEME_ESTILOS[estilo] ? estilo : 'polar'
     return res.json(r)
-  } catch { try { unlinkSync(out) } catch {}; return res.status(502).json({ ok: false, error_pt: 'Falha ao gerar o tema.' }) }
+  } catch (e) {
+    try { unlinkSync(out) } catch {}
+    const semIM = /ENOENT|not found|spawn|No such file/i.test(String(e?.message ?? ''))
+    return res.status(502).json({ ok: false, error_pt: semIM ? 'Gerador de temas ainda nao ativo na VPS (instala: sudo apt install -y imagemagick).' : 'Falha ao gerar o tema.' })
+  }
 })
 
 // ── /logo?texto=Polar&estilo=neon → logo de texto estilizado (ImageMagick) ───

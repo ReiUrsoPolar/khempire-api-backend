@@ -31,8 +31,21 @@ export const LOGO_ESTILOS = {
 
 export const LOGO_NOMES = Object.keys(LOGO_ESTILOS)
 
+// Constrói os args ImageMagick do FUNDO do logo:
+//  · 'transparente' → sem fundo (PNG transparente, bom p/ overlays/stickers)
+//  · '#rrggbb' / nome de cor → cor sólida
+//  · (default) → vinheta escura (spotlight) que dá profundidade sem matar o brilho
+function _fundoArgs(fundo, W, H) {
+  const f = String(fundo || '').trim().toLowerCase()
+  if (f === 'transparente' || f === 'transparent' || f === 'nenhum') return ['-size', `${W}x${H}`, 'xc:none']
+  if (/^#?[0-9a-f]{6}$/i.test(f)) return ['-size', `${W}x${H}`, `xc:${f[0] === '#' ? f : '#' + f}`]
+  if (f === 'preto' || f === 'black') return ['-size', `${W}x${H}`, 'xc:black']
+  return ['-size', `${W}x${H}`, 'radial-gradient:#1d1f24-#000000']
+}
+
 // Gera o PNG do logo em `out`. Lança em caso de falha. Limpa sempre os temporários.
-export function gerarLogo({ texto, estilo, imBin, idBin, font, dir, out }) {
+// `fundo` (opcional): 'transparente' | '#rrggbb' | 'preto' | (default vinheta).
+export function gerarLogo({ texto, estilo, imBin, idBin, font, dir, out, fundo }) {
   const W = 1280, H = 640
   const txt = String(texto || '').replace(/[\r\n\f\\%]+/g, ' ').replace(/^[@\-]+/, '').slice(0, 30).trim() || 'Texto'
   const st  = LOGO_ESTILOS[String(estilo || 'neon').toLowerCase()] || LOGO_ESTILOS.neon
@@ -45,7 +58,9 @@ export function gerarLogo({ texto, estilo, imBin, idBin, font, dir, out }) {
   const ident = (f) => execFileSync(idBin, usaMagick ? ['identify', '-format', '%w %h', f] : ['-format', '%w %h', f], { timeout: 8_000 }).toString().trim()
 
   try {
-    const txtC = nt(), txtP = nt()
+    const txtC = nt(), txtP = nt(), bg = nt()
+    // fundo (vinheta por defeito) — primeiro para servir de base aos composites
+    im([..._fundoArgs(fundo, W, H), bg])
     // texto branco centrado (canvas inteiro) + versão recortada (bounding box)
     im(['-size', `${W}x${H}`, 'xc:none', '-gravity', 'center', '-font', font, '-pointsize', String(fs), '-fill', 'white', '-annotate', '+0+0', txt, txtC])
     im([txtC, '-trim', '+repage', txtP])
@@ -56,7 +71,7 @@ export function gerarLogo({ texto, estilo, imBin, idBin, font, dir, out }) {
       const face = nt(), core = nt()
       im([txtC, '-fill', st.cor, '-colorize', '100', face])
       im([txtC, '-fill', 'white', '-colorize', '100', '-blur', '0x1.2', core])
-      im(['-size', `${W}x${H}`, 'xc:black',
+      im([bg,
         '(', face, '-blur', '0x30', ')', '-compose', 'screen', '-composite',
         '(', face, '-blur', '0x15', ')', '-compose', 'screen', '-composite',
         '(', face, '-blur', '0x6',  ')', '-compose', 'screen', '-composite',
@@ -70,7 +85,7 @@ export function gerarLogo({ texto, estilo, imBin, idBin, font, dir, out }) {
       im([grad, txtP, '-compose', 'CopyOpacity', '-composite', face])
       im(['-size', `${W}x${H}`, 'xc:none', face, '-gravity', 'center', '-composite', faceC])
       im([txtC, '-channel', 'A', '-morphology', 'Dilate', 'Disk:3', '+channel', '-fill', 'black', '-colorize', '100', outl])
-      im(['-size', `${W}x${H}`, 'xc:black',
+      im([bg, '-compose', 'over',
         '(', outl, '-background', 'black', '-shadow', '90x8+0+12', ')', '-gravity', 'center', '-composite',
         outl,  '-gravity', 'center', '-composite',
         faceC, '-gravity', 'center', '-composite',
@@ -78,11 +93,60 @@ export function gerarLogo({ texto, estilo, imBin, idBin, font, dir, out }) {
     } else { // 3d — extrusão
       const face = nt()
       im([txtC, '-fill', st.cor, '-colorize', '100', face])
-      const a = ['-size', `${W}x${H}`, 'xc:black']
+      const a = [bg, '-compose', 'over']
       for (let i = 14; i >= 1; i--) a.push('(', txtC, '-fill', '#222a33', '-colorize', '100', ')', '-gravity', 'center', '-geometry', `+${i}+${i}`, '-composite')
       a.push(face, '-gravity', 'center', '-composite', out)
       im(a)
     }
+    return out
+  } finally {
+    for (const f of tmp) { try { unlinkSync(f) } catch {} }
+  }
+}
+
+// ── /theme — cartão personalizado bonito (gradiente + vinheta + nome com brilho) ──
+export const THEME_ESTILOS = {
+  polar:  ['#0a2540', '#00e0ff'], neon: ['#7c3aed', '#ff2d95'], fogo: ['#ff512f', '#f09819'],
+  matrix: ['#05140a', '#00ff66'], ouro: ['#1a1408', '#ffd700'], roxo: ['#2b0a4d', '#c44eff'],
+  oceano: ['#000428', '#4364f7'], rosa: ['#ff0844', '#ffb199'], verde: ['#0f2027', '#2bff88'],
+  preto:  ['#101317', '#3a4250'], vermelho: ['#2a0606', '#ff3b3b'], azul: ['#06122a', '#3b82f6'],
+}
+export const THEME_NOMES = Object.keys(THEME_ESTILOS)
+
+// Cartão 1280x720: gradiente diagonal + vinheta + nome grande (sombra+brilho na
+// cor de destaque) + subtítulo opcional + linha de destaque. Lança em falha.
+export function gerarTheme({ texto, sub, estilo, imBin, font, dir, out }) {
+  const W = 1280, H = 720
+  const nome = String(texto || '').replace(/[\r\n\f\\%]+/g, ' ').replace(/^[@\-]+/, '').slice(0, 24).trim() || 'Polar'
+  const subt = String(sub || '').replace(/[\r\n\f\\%]+/g, ' ').replace(/^[@\-]+/, '').slice(0, 40).trim()
+  const [c0, c1] = THEME_ESTILOS[String(estilo || 'polar').toLowerCase()] || THEME_ESTILOS.polar
+  const fsN = Math.max(60, Math.min(170, Math.floor(1500 / Math.max(nome.length, 1))))
+  const offN = subt ? -34 : 0
+
+  const tmp = []
+  const nt  = () => { const p = join(dir, randomBytes(8).toString('hex') + '.png'); tmp.push(p); return p }
+  const im  = (args) => execFileSync(imBin, args, { stdio: 'ignore', timeout: 15_000 })
+
+  try {
+    const bg = nt(), nameImg = nt()
+    const offNome = subt ? -46 : -6
+    // 1) fundo: c0 escuro + foco radial suave na cor de destaque (spotlight)
+    im(['-size', `${W}x${H}`, `xc:${c0}`,
+        '(', '-size', `${W}x${H}`, `radial-gradient:${c1}-none`, '-channel', 'A', '-evaluate', 'multiply', '0.32', '+channel', ')',
+        '-compose', 'over', '-composite', bg])
+    // 2) nome em branco (camada para sombra + brilho subtil), centrado e subido se houver subtítulo
+    im(['-size', `${W}x${H}`, 'xc:none', '-gravity', 'center', '-font', font, '-pointsize', String(fsN), '-fill', 'white', '-annotate', `+0+${offNome}`, nome, nameImg])
+    // 3) compor: fundo + brilho subtil (destaque) + sombra nítida + nome branco
+    const a = [bg, '-compose', 'over',
+      '(', nameImg, '-fill', c1, '-colorize', '100', '-blur', '0x9', ')', '-gravity', 'center', '-compose', 'screen', '-composite',
+      '(', nameImg, '-background', 'black', '-shadow', '70x5+0+6', ')', '-gravity', 'center', '-compose', 'over', '-composite',
+      nameImg, '-gravity', 'center', '-compose', 'over', '-composite', '-compose', 'over']
+    // 4) linha de destaque + subtítulo, claramente por baixo do nome
+    const lineY = Math.round(H / 2 + (subt ? 30 : 70))
+    a.push('-fill', c1, '-draw', `roundrectangle ${W / 2 - 80},${lineY} ${W / 2 + 80},${lineY + 7} 3,3`)
+    if (subt) a.push('-gravity', 'center', '-font', font, '-pointsize', '40', '-fill', '#e8eef5', '-annotate', `+0+${Math.round(H * 0.13)}`, subt)
+    a.push(out)
+    im(a)
     return out
   } finally {
     for (const f of tmp) { try { unlinkSync(f) } catch {} }
