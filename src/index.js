@@ -12,7 +12,7 @@ import { promisify } from 'util'
 import { fileURLToPath } from 'url'
 import { join, basename } from 'path'
 import { tmpdir } from 'os'
-import { gerarLogo, LOGO_ESTILOS, gerarTheme, THEME_ESTILOS } from './logo.js'
+import { gerarLogo, LOGO_ESTILOS, gerarTheme, THEME_ESTILOS, gerarTtp } from './logo.js'
 
 // Chamamos o BINÁRIO yt-dlp diretamente (não o wrapper youtube-dl-exec, que
 // pendurava em pesquisas yt/sc — o await nunca resolvia → Caddy 502). O binário
@@ -409,6 +409,44 @@ app.get('/logo', (req, res) => {
     try { unlinkSync(out) } catch {}
     const semIM = /ENOENT|not found|spawn|No such file/i.test(String(e?.message ?? ''))
     return res.status(502).json({ ok: false, error_pt: semIM ? 'Gerador de logos ainda nao ativo na VPS (instala: sudo apt install -y imagemagick).' : 'Falha ao gerar o logo.' })
+  }
+})
+
+// ── /ttp?texto=...&estilo=white → figurinha de TEXTO (webp) ──────────────────
+// Estilos: white, preto, brat, attp/rainbow. Substitui attp/brat/white da Bronxys.
+app.get('/ttp', (req, res) => {
+  const texto = String(req.query.texto || req.query.text || '').trim()
+  if (!texto) return res.status(400).json({ ok: false, error_pt: 'Falta o parametro "texto".' })
+  if (!existsSync(THEME_FONT)) return res.status(502).json({ ok: false, error_pt: 'Fonte em falta na VPS. Instala: sudo apt install -y fonts-dejavu-core' })
+  const estilo = String(req.query.estilo || req.query.tema || req.query.category || 'white').toLowerCase()
+  const out = _novoOut('webp')
+  try {
+    gerarTtp({ texto, estilo, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    return res.json(_servirFile(out))
+  } catch (e) {
+    try { unlinkSync(out) } catch {}
+    const semIM = /ENOENT|not found|spawn|No such file/i.test(String(e?.message ?? ''))
+    return res.status(502).json({ ok: false, error_pt: semIM ? 'Gerador de figurinhas ainda nao ativo na VPS (instala: sudo apt install -y imagemagick).' : 'Falha ao gerar a figurinha.' })
+  }
+})
+
+// ── /ocr?url=<imagem>&lang=por+eng → extrai texto (Tesseract) ────────────────
+const _ocrBin = [process.env.OCR_BIN, '/usr/bin/tesseract', '/usr/local/bin/tesseract']
+  .find(p => { try { return p && existsSync(p) } catch { return false } }) || 'tesseract'
+app.get('/ocr', async (req, res) => {
+  const url = String(req.query.url || '').trim()
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error_pt: 'Parametro "url" (imagem) invalido.' })
+  const lang = (String(req.query.lang || 'por+eng').replace(/[^a-z+]/gi, '')) || 'por+eng'
+  let inp
+  try {
+    inp = await _baixarTmp(url, 'img')
+    const texto = execFileSync(_ocrBin, [inp, 'stdout', '-l', lang], { timeout: 30_000 }).toString().trim()
+    try { unlinkSync(inp) } catch {}
+    return res.json({ ok: true, resultado: { texto, lang, aviso: texto ? undefined : 'Nenhum texto detetado.' } })
+  } catch (e) {
+    try { unlinkSync(inp) } catch {}
+    const semOcr = /ENOENT|not found|spawn|No such file/i.test(String(e?.message ?? ''))
+    return res.status(502).json({ ok: false, error_pt: semOcr ? 'OCR ainda nao ativo na VPS (instala: sudo apt install -y tesseract-ocr tesseract-ocr-por).' : 'Falha ao extrair texto.' })
   }
 })
 

@@ -104,6 +104,39 @@ export function gerarLogo({ texto, estilo, imBin, idBin, font, dir, out, fundo }
   }
 }
 
+// ── /ttp — figurinha de TEXTO (webp 512x512) — substitui attp/brat/white da Bronxys ──
+// Estilos: white (texto preto/fundo branco), preto, brat (verde-lima, minúsculas,
+// leve blur — estilo do álbum "brat"), attp/rainbow (texto arco-íris, fundo
+// transparente). O caption: ajusta o tamanho da fonte para caber no quadrado.
+export function gerarTtp({ texto, estilo, imBin, font, dir, out }) {
+  const S = 512
+  const txt = String(texto || '').replace(/[\r\n\f\\%]+/g, ' ').replace(/^[@\-]+/, '').slice(0, 60).trim() || 'texto'
+  const est = String(estilo || 'white').toLowerCase()
+  const tmp = []
+  const nt  = () => { const p = join(dir, randomBytes(8).toString('hex') + '.png'); tmp.push(p); return p }
+  const im  = (args) => execFileSync(imBin, args, { stdio: 'ignore', timeout: 15_000 })
+  // figurinha simples: caption (auto-fit) sobre fundo, recortado a 512x512
+  const simples = (bg, fill, txtv, extra = []) =>
+    im(['-background', bg, '-fill', fill, '-font', font, '-size', `${S - 60}x${S - 80}`, '-gravity', 'center', `caption:${txtv}`, '-gravity', 'center', '-extent', `${S}x${S}`, ...extra, out])
+  try {
+    if (est === 'brat') {
+      simples('#8ACE00', 'black', txt.toLowerCase(), ['-blur', '0x1.3'])
+    } else if (est === 'preto' || est === 'black') {
+      simples('black', 'white', txt)
+    } else if (est === 'attp' || est === 'rainbow') {
+      const mask = nt(), grad = nt()
+      im(['-background', 'none', '-fill', 'white', '-font', font, '-size', `${S - 60}x${S - 80}`, '-gravity', 'center', `caption:${txt}`, '-gravity', 'center', '-extent', `${S}x${S}`, mask])
+      im(['(', 'xc:#ff2b2b', 'xc:#ff9b1a', 'xc:#ffe81a', 'xc:#3ad14b', 'xc:#1ea0ff', 'xc:#9b4dff', '+append', ')', '-filter', 'Triangle', '-resize', `${S}x${S}!`, grad])
+      im([grad, mask, '-compose', 'CopyOpacity', '-composite', out])
+    } else { // white (default)
+      simples('white', 'black', txt)
+    }
+    return out
+  } finally {
+    for (const f of tmp) { try { unlinkSync(f) } catch {} }
+  }
+}
+
 // ── /theme — cartão personalizado bonito (gradiente + vinheta + nome com brilho) ──
 export const THEME_ESTILOS = {
   polar:  ['#0a2540', '#00e0ff'], neon: ['#7c3aed', '#ff2d95'], fogo: ['#ff512f', '#f09819'],
