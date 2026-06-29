@@ -504,7 +504,7 @@ const _ship = async (req, res) => {
   const out = _novoOut('png'); let a, b
   try {
     a = await _baixarTmp(img1, 'img'); b = await _baixarTmp(img2, 'img')
-    const r = gerarShip({ img1: a, img2: b, nome1: req.query.nome1, nome2: req.query.nome2, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    const r = gerarShip({ img1: a, img2: b, nome1: req.query.nome1, nome2: req.query.nome2, seed1: img1, seed2: img2, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
     const out2 = _servirFile(out); out2.resultado.compatibilidade = r.pct
     return res.json(out2)
   } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'o ship') }
@@ -520,7 +520,7 @@ app.get('/wanted', async (req, res) => {
   const out = _novoOut('png'); let inp
   try {
     inp = await _baixarTmp(img, 'img')
-    gerarWanted({ img: inp, nome: req.query.nome, recompensa: req.query.recompensa, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
+    gerarWanted({ img: inp, nome: req.query.nome, recompensa: req.query.recompensa, seed: img, imBin: _imBin, font: THEME_FONT, dir: DL_DIR, out })
     return res.json(_servirFile(out))
   } catch (e) { try { unlinkSync(out) } catch {}; return _erroMontagem(res, e, 'o cartaz') }
   finally { try { unlinkSync(inp) } catch {} }

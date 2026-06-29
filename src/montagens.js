@@ -15,7 +15,9 @@ function _ctx(imBin, dir) {
   return { tmp, nt, im, limpar }
 }
 function _txt(s, max) {
-  return String(s || '').replace(/[\r\n\f\\%]+/g, ' ').replace(/^[@\-]+/, '').slice(0, max).trim()
+  // Tira quebras de linha e caracteres com significado para o ImageMagick
+  // (-draw/-annotate/caption:): \, %, aspas, crase e @ (evita @ficheiro).
+  return String(s || '').replace(/[\r\n\f\\%"'`@]+/g, ' ').replace(/^[-]+/, '').slice(0, max).trim()
 }
 // % determinística a partir dos inputs (mesmo par → mesma %), nunca 0.
 function _pct(...partes) {
@@ -27,10 +29,11 @@ function _pct(...partes) {
 function _cover(w, h) { return ['-resize', `${w}x${h}^`, '-gravity', 'center', '-extent', `${w}x${h}`] }
 
 // ── /ship?img1=&img2= → casal + % de compatibilidade ──────────────────────
-export function gerarShip({ img1, img2, nome1, nome2, imBin, font, dir, out }) {
+export function gerarShip({ img1, img2, nome1, nome2, seed1, seed2, imBin, font, dir, out }) {
   const { nt, im, limpar } = _ctx(imBin, dir)
   const W = 820, H = 430, S = 330
-  const pct = _pct(img1, img2, nome1 || '', nome2 || '')
+  // % a partir das URLs originais (estáveis) — não dos paths temporários.
+  const pct = _pct(seed1 || img1, seed2 || img2, nome1 || '', nome2 || '')
   try {
     const a = nt(), b = nt(), bg = nt()
     im(['(', img1, ...(_cover(S, S)), ')', '-bordercolor', 'white', '-border', '4', a])
@@ -52,11 +55,12 @@ export function gerarShip({ img1, img2, nome1, nome2, imBin, font, dir, out }) {
 }
 
 // ── /wanted?img= → cartaz "PROCURADO" ─────────────────────────────────────
-export function gerarWanted({ img, nome, recompensa, imBin, font, dir, out }) {
+export function gerarWanted({ img, nome, recompensa, seed, imBin, font, dir, out }) {
   const { nt, im, limpar } = _ctx(imBin, dir)
   const W = 640, H = 860, S = 380
   const quem = _txt(nome, 22) || 'PROCURADO'
-  const reward = (_txt(recompensa, 14) || ('$' + (10 + _pct(img) * 9) + ',000')).replace(/[^0-9$.,A-Za-z ]/g, '')
+  // recompensa por omissão estável (da URL original, não do path temporário).
+  const reward = (_txt(recompensa, 14) || ('$' + (10 + _pct(seed || img) * 9) + ',000')).replace(/[^0-9$.,A-Za-z ]/g, '')
   try {
     const foto = nt(), bg = nt()
     im(['(', img, ...(_cover(S, S)), '-modulate', '105,55', '-sepia-tone', '70%', ')', '-bordercolor', '#3a2a12', '-border', '6', foto])
@@ -161,21 +165,20 @@ export function gerarQuote({ img, texto, autor, imBin, font, dir, out }) {
   const frase = _txt(texto, 220) || '...'
   const quem = _txt(autor, 26)
   try {
-    const foto = nt(), fade = nt(), bg = nt(), txt = nt()
+    const foto = nt(), fade = nt(), fundida = nt(), bg = nt(), txt = nt()
     // foto a P&B no lado esquerdo
     im(['(', img, ...(_cover(H, H)), '-colorspace', 'Gray', ')', foto])
     // máscara horizontal: opaco à esquerda → transparente à direita (funde no preto)
     im(['-size', `${H}x${H}`, 'gradient:white-black', fade])
-    im([foto, fade, '-alpha', 'off', '-compose', 'CopyOpacity', '-composite', bg + '_f.png'])
+    im([foto, fade, '-alpha', 'off', '-compose', 'CopyOpacity', '-composite', fundida])
     // fundo preto + foto fundida à esquerda
-    im(['-size', `${W}x${H}`, 'xc:black', bg + '_f.png', '-gravity', 'west', '-composite', bg])
+    im(['-size', `${W}x${H}`, 'xc:black', fundida, '-gravity', 'west', '-composite', bg])
     // texto branco (auto-fit) no lado direito
     im(['-background', 'none', '-fill', 'white', '-font', font, '-size', `${W - H - 80}x${H - 160}`, '-gravity', 'center', `caption:“${frase}”`, txt])
     const a = [bg, txt, '-gravity', 'east', '-geometry', '+40+-30', '-composite']
     if (quem) a.push('-gravity', 'southeast', '-font', font, '-fill', '#bbbbbb', '-pointsize', '34', '-annotate', '+50+40', `— ${quem}`)
     a.push(out)
     im(a)
-    try { unlinkSync(bg + '_f.png') } catch {}
     return { out }
   } finally { limpar() }
 }
